@@ -22,6 +22,9 @@ const {
   getSubscriberByStripeCustomer,
   setSubscriberStatus,
   getActiveSubscribers,
+  hasProcessedStripeEvent,
+  recordStripeEvent,
+  getNewsletterHistory,
 } = require('./db/database');
 
 const app  = express();
@@ -74,6 +77,12 @@ app.post(
     }
 
     console.log(`[Stripe] Event: ${event.type}`);
+
+    // Idempotency: skip events we've already handled
+    if (hasProcessedStripeEvent(event.id)) {
+      console.log(`[Stripe] Duplicate event skipped: ${event.id}`);
+      return res.json({ received: true });
+    }
 
     try {
       switch (event.type) {
@@ -136,6 +145,7 @@ app.post(
       return res.status(500).json({ error: 'Internal error processing event' });
     }
 
+    recordStripeEvent(event.id, event.type);
     res.json({ received: true });
   }
 );
@@ -239,11 +249,20 @@ app.get('/cancel', (req, res) => {
   `);
 });
 
-// ── Admin: subscriber stats — requires ADMIN_SECRET_KEY header ─────────────────
-app.get('/admin/stats', (req, res) => {
+// ── Admin auth middleware ──────────────────────────────────────────────────────
+function requireAdmin(req, res, next) {
   const adminKey = process.env.ADMIN_SECRET_KEY;
   if (!adminKey || req.headers['x-admin-key'] !== adminKey) {
     return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
+}
+
+// ── Admin: subscriber stats ────────────────────────────────────────────────────
+app.get('/admin/stats', requireAdmin, (req, res) => {
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+  if (!checkRateLimit(ip)) {
+    return res.status(429).json({ error: 'Too many requests — try again later' });
   }
 
   const subscribers = getActiveSubscribers();
@@ -253,7 +272,19 @@ app.get('/admin/stats', (req, res) => {
       basic: subscribers.filter(s => s.tier === 'basic').length,
       pro:   subscribers.filter(s => s.tier === 'pro').length,
     },
+    timestamp: new Date().toISOString(),
   });
+});
+
+// ── Admin: newsletter history ─────────────────────────────────────────────────
+app.get('/admin/newsletters', requireAdmin, (req, res) => {
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+  if (!checkRateLimit(ip)) {
+    return res.status(429).json({ error: 'Too many requests — try again later' });
+  }
+
+  const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+  res.json({ newsletters: getNewsletterHistory(limit) });
 });
 
 // ── Health check ───────────────────────────────────────────────────────────────

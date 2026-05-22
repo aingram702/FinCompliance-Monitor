@@ -7,10 +7,12 @@ const nvd    = require('./nvd');
 const occ    = require('./occ');
 const fincen = require('./fincen');
 const ffiec  = require('./ffiec');
+const sec    = require('./sec');
+const fed    = require('./fed');
 
 const { filterNewItems, markItemsSent } = require('../db/database');
 
-const ALL_SCRAPERS = [cisa, nvd, occ, fincen, ffiec];
+const ALL_SCRAPERS = [cisa, nvd, occ, fincen, ffiec, sec, fed];
 
 async function runAllScrapers() {
   console.log('[Scrapers] Starting all scrapers...');

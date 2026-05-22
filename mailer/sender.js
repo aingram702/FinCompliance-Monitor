@@ -3,7 +3,7 @@
 // Each subscriber gets a personalized unsubscribe link.
 
 const { Resend } = require('resend');
-const { buildHtml, buildText } = require('../templates/newsletter');
+const { buildHtml, buildText, buildDigestHtml, buildDigestText } = require('../templates/newsletter');
 const { saveNewsletter, logSend } = require('../db/database');
 require('dotenv').config();
 
@@ -21,11 +21,14 @@ function sleep(ms) {
 }
 
 /**
- * Send newsletter to a single subscriber.
+ * Send newsletter to a single subscriber (pro = full, basic = digest).
  */
-async function sendToOne(subscriber, newsletter, htmlBody, textBody) {
+async function sendToOne(subscriber, newsletter, proHtmlTemplate, proTextBody, digestHtmlTemplate, digestTextBody) {
   const unsubUrl = `${APP_URL}/unsubscribe?token=${subscriber.unsubscribe_token}`;
-  const html     = htmlBody.replace(/UNSUBSCRIBE_URL_PLACEHOLDER/g, unsubUrl);
+  const isPro    = subscriber.tier === 'pro';
+  const template = isPro ? proHtmlTemplate : digestHtmlTemplate;
+  const textBody = isPro ? proTextBody     : digestTextBody;
+  const html     = template.replace(/UNSUBSCRIBE_URL_PLACEHOLDER/g, unsubUrl);
 
   try {
     await resend.emails.send({
@@ -58,17 +61,21 @@ async function sendNewsletter(newsletter, subscribers, itemCount) {
     return;
   }
 
-  // Build the template once (with placeholder for unsubscribe URL)
-  const htmlTemplate = buildHtml(newsletter, 'UNSUBSCRIBE_URL_PLACEHOLDER', APP_URL);
-  const textBody     = buildText(newsletter);
+  // Build both full and digest templates once (placeholder replaced per subscriber)
+  const proHtmlTemplate    = buildHtml(newsletter, 'UNSUBSCRIBE_URL_PLACEHOLDER', APP_URL);
+  const proTextBody        = buildText(newsletter);
+  const digestHtmlTemplate = buildDigestHtml(newsletter, 'UNSUBSCRIBE_URL_PLACEHOLDER', APP_URL);
+  const digestTextBody     = buildDigestText(newsletter);
 
-  console.log(`[Mailer] Sending to ${subscribers.length} subscriber(s)...`);
+  const proCount   = subscribers.filter(s => s.tier === 'pro').length;
+  const basicCount = subscribers.length - proCount;
+  console.log(`[Mailer] Sending to ${subscribers.length} subscriber(s) — Pro: ${proCount}, Basic: ${basicCount}`);
 
-  // Save newsletter record
+  // Save newsletter record (store full version as canonical)
   const record = saveNewsletter({
     subject:        newsletter.subject,
-    htmlBody:       htmlTemplate,
-    textBody,
+    htmlBody:       proHtmlTemplate,
+    textBody:       proTextBody,
     itemCount,
     recipientCount: subscribers.length,
   });
@@ -77,7 +84,7 @@ async function sendNewsletter(newsletter, subscribers, itemCount) {
 
   for (let i = 0; i < subscribers.length; i++) {
     const subscriber = subscribers[i];
-    const result = await sendToOne(subscriber, newsletter, htmlTemplate, textBody);
+    const result = await sendToOne(subscriber, newsletter, proHtmlTemplate, proTextBody, digestHtmlTemplate, digestTextBody);
     logSend(record.id, subscriber.id, subscriber.email, result.success ? 'sent' : 'failed');
 
     if (result.success) {

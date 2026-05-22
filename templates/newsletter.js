@@ -7,6 +7,8 @@ const SOURCE_COLORS = {
   OCC:    '#2a9d8f',
   FinCEN: '#264653',
   FFIEC:  '#6a4c93',
+  SEC:    '#1565c0',
+  FED:    '#2e7d32',
 };
 
 function escHtml(str) {
@@ -179,4 +181,92 @@ function buildText(newsletter) {
   return text;
 }
 
-module.exports = { buildHtml, buildText };
+// ── Digest versions (Basic tier — top 2 items per section + upgrade CTA) ───────
+
+const DIGEST_MAX_ITEMS = 2;
+
+function buildDigestHtml(newsletter, unsubscribeUrl, appUrl) {
+  const date          = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  const safeUnsubUrl  = safeUrl(unsubscribeUrl);
+  const safeAppUrl    = safeUrl(appUrl);
+
+  const sectionsHtml = newsletter.sections.map(section => {
+    const items = (section.items || []).slice(0, DIGEST_MAX_ITEMS);
+    if (items.length === 0) return '';
+    return `
+    <div style="margin-bottom:24px;">
+      <h2 style="font-size:16px;color:#fff;background:#1a1a2e;padding:8px 14px;border-radius:4px;margin:0 0 12px 0;">
+        ${escHtml(section.title)}
+      </h2>
+      ${items.map(item => `
+        <div style="background:#fff;border:1px solid #e8e8e8;border-radius:6px;padding:14px 18px;margin-bottom:10px;">
+          <div style="margin-bottom:6px;">${sourceBadge(item.source)}</div>
+          <h3 style="margin:6px 0;font-size:14px;color:#1a1a2e;">
+            <a href="${safeUrl(item.url)}" style="color:#1a1a2e;text-decoration:none;">${escHtml(item.title)}</a>
+          </h3>
+          <p style="margin:6px 0;font-size:13px;color:#555;line-height:1.5;">${escHtml(item.summary)}</p>
+        </div>`).join('')}
+    </div>`;
+  }).join('');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escHtml(newsletter.subject)} [Digest]</title>
+</head>
+<body style="margin:0;padding:0;background:#f0f2f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+  <div style="max-width:680px;margin:24px auto;background:#f0f2f5;">
+    <div style="background:#1a1a2e;padding:24px 32px;border-radius:8px 8px 0 0;">
+      <h1 style="margin:0;font-size:20px;color:#fff;font-weight:700;">&#127974; FinCompliance Monitor <span style="font-size:13px;color:#8fa3bf;font-weight:400;">— Digest Edition</span></h1>
+      <p style="margin:4px 0 0;font-size:13px;color:#8fa3bf;">${escHtml(date)}</p>
+    </div>
+    <div style="background:#16213e;padding:16px 32px;">
+      <p style="margin:0 0 4px;font-size:11px;color:#8fa3bf;text-transform:uppercase;letter-spacing:1px;font-weight:700;">Editor's Take</p>
+      <p style="margin:0;font-size:14px;color:#e2e8f0;line-height:1.6;">${escHtml(newsletter.editorsTake)}</p>
+    </div>
+    <div style="padding:20px 32px 8px;background:#f0f2f5;">
+      ${sectionsHtml}
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:16px 20px;margin-bottom:20px;text-align:center;">
+        <strong style="font-size:13px;color:#1e40af;">You're on the Basic plan</strong>
+        <p style="margin:6px 0 12px;font-size:13px;color:#374151;">Upgrade to Pro for the full briefing — every item, action required notes, and urgent alerts.</p>
+        <a href="${safeAppUrl}" style="background:#2563eb;color:#fff;text-decoration:none;padding:8px 20px;border-radius:4px;font-size:13px;font-weight:600;">Upgrade to Pro &rarr;</a>
+      </div>
+    </div>
+    <div style="background:#1a1a2e;padding:16px 32px;border-radius:0 0 8px 8px;text-align:center;">
+      <p style="margin:0 0 6px;font-size:12px;color:#8fa3bf;">You're receiving this because you subscribed to FinCompliance Monitor.</p>
+      <p style="margin:0;font-size:12px;">
+        <a href="${safeAppUrl}" style="color:#60a5fa;text-decoration:none;">Manage Subscription</a>
+        &nbsp;&middot;&nbsp;
+        <a href="${safeUnsubUrl}" style="color:#60a5fa;text-decoration:none;">Unsubscribe</a>
+      </p>
+      <p style="margin:10px 0 0;font-size:11px;color:#4a5568;">FinCompliance Monitor &middot; Not legal or compliance advice &middot; Always consult your legal counsel.</p>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
+function buildDigestText(newsletter) {
+  const date = new Date().toDateString();
+  let text = `FINCOMPLIANCE MONITOR — DIGEST — ${date}\n`;
+  text += `${'='.repeat(60)}\n\n`;
+  text += `EDITOR'S TAKE\n${newsletter.editorsTake}\n\n`;
+
+  for (const section of newsletter.sections) {
+    const items = (section.items || []).slice(0, DIGEST_MAX_ITEMS);
+    if (items.length === 0) continue;
+    text += `\n${section.title.toUpperCase()}\n${'-'.repeat(section.title.length)}\n`;
+    for (const item of items) {
+      text += `\n[${item.source}] ${item.title}\n${item.summary}\nLink: ${item.url}\n`;
+    }
+  }
+
+  text += `\n${'='.repeat(60)}\n`;
+  text += `You're on the Basic plan. Upgrade for the full briefing.\n`;
+  text += `FinCompliance Monitor. Not legal or compliance advice.\n`;
+  return text;
+}
+
+module.exports = { buildHtml, buildText, buildDigestHtml, buildDigestText };

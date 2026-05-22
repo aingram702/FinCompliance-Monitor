@@ -7,7 +7,7 @@ require('dotenv').config();
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-const SYSTEM_PROMPT = `You are a senior compliance and cybersecurity analyst specializing in U.S. financial institutions. 
+const SYSTEM_PROMPT = `You are a senior compliance and cybersecurity analyst specializing in U.S. financial institutions.
 Your audience is compliance officers, IT security leads, and risk managers at banks, credit unions, and fintechs.
 
 When given raw regulatory and security intelligence items, you:
@@ -18,7 +18,7 @@ When given raw regulatory and security intelligence items, you:
 5. Add a brief "Editor's Take" at the top — 3-4 sentences summarizing the most critical themes of this briefing
 6. Flag anything that requires immediate attention with ⚠️ URGENT
 
-Output ONLY valid JSON — no markdown, no preamble, no trailing text. 
+Output ONLY valid JSON — no markdown, no preamble, no trailing text.
 Follow this exact schema:
 {
   "subject": "string (compelling email subject line, include date range)",
@@ -75,12 +75,20 @@ Remember: output ONLY valid JSON, nothing else.
 
   console.log(`[Agent] Sending ${items.length} items to Claude for synthesis...`);
 
-  const message = await client.messages.create({
+  const stream = client.messages.stream({
     model:      'claude-opus-4-7',
     max_tokens: 4096,
-    system:     SYSTEM_PROMPT,
-    messages:   [{ role: 'user', content: userPrompt }],
+    system: [{
+      type:          'text',
+      text:          SYSTEM_PROMPT,
+      cache_control: { type: 'ephemeral' },
+    }],
+    messages: [{ role: 'user', content: userPrompt }],
   });
+
+  const message = await stream.finalMessage();
+  const { input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens } = message.usage;
+  console.log(`[Agent] Tokens — in: ${input_tokens}, out: ${output_tokens}, cache_read: ${cache_read_input_tokens ?? 0}, cache_write: ${cache_creation_input_tokens ?? 0}`);
 
   const raw = message.content[0]?.text?.trim() || '';
 

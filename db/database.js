@@ -63,6 +63,19 @@ function initSchema() {
       status          TEXT NOT NULL DEFAULT 'sent',
       sent_at         TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS stripe_events (
+      id           TEXT PRIMARY KEY,
+      type         TEXT NOT NULL,
+      processed_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_subscribers_status         ON subscribers(status);
+    CREATE INDEX IF NOT EXISTS idx_subscribers_token          ON subscribers(unsubscribe_token);
+    CREATE INDEX IF NOT EXISTS idx_subscribers_stripe_customer ON subscribers(stripe_customer_id);
+    CREATE INDEX IF NOT EXISTS idx_sent_items_lookup          ON sent_items(source, item_guid);
+    CREATE INDEX IF NOT EXISTS idx_send_log_newsletter        ON send_log(newsletter_id);
+    CREATE INDEX IF NOT EXISTS idx_newsletters_sent_at        ON newsletters(sent_at DESC);
   `);
 }
 
@@ -140,6 +153,27 @@ function logSend(newsletterId, subscriberId, email, status = 'sent') {
   `).run(newsletterId, subscriberId, email, status);
 }
 
+// ── Stripe event idempotency ───────────────────────────────────────────────────
+
+function hasProcessedStripeEvent(eventId) {
+  return !!getDb().prepare('SELECT 1 FROM stripe_events WHERE id = ?').get(eventId);
+}
+
+function recordStripeEvent(eventId, type) {
+  getDb().prepare('INSERT OR IGNORE INTO stripe_events (id, type) VALUES (?, ?)').run(eventId, type);
+}
+
+// ── Newsletter history ─────────────────────────────────────────────────────────
+
+function getNewsletterHistory(limit = 20) {
+  return getDb().prepare(`
+    SELECT id, subject, item_count, recipient_count, sent_at
+    FROM newsletters
+    ORDER BY sent_at DESC
+    LIMIT ?
+  `).all(limit);
+}
+
 module.exports = {
   getDb,
   upsertSubscriber,
@@ -151,4 +185,7 @@ module.exports = {
   markItemsSent,
   saveNewsletter,
   logSend,
+  hasProcessedStripeEvent,
+  recordStripeEvent,
+  getNewsletterHistory,
 };

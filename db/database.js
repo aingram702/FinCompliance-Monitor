@@ -92,6 +92,7 @@ function upsertSubscriber({ email, stripeCustomerId, stripeSubscriptionId, statu
       stripe_subscription_id = COALESCE(excluded.stripe_subscription_id, stripe_subscription_id),
       status                 = excluded.status,
       tier                   = COALESCE(excluded.tier, tier),
+      unsubscribe_token      = excluded.unsubscribe_token,
       updated_at             = datetime('now')
     RETURNING *
   `).get(email, stripeCustomerId || null, stripeSubscriptionId || null, status || 'active', tier || 'basic', token);

@@ -30,22 +30,31 @@ async function sendToOne(subscriber, newsletter, proHtmlTemplate, proTextBody, d
   const textBody = isPro ? proTextBody     : digestTextBody;
   const html     = template.replace(/UNSUBSCRIBE_URL_PLACEHOLDER/g, unsubUrl);
 
-  try {
-    await resend.emails.send({
-      from:    `${FROM_NAME} <${FROM_EMAIL}>`,
-      to:      subscriber.email,
-      subject: newsletter.subject,
-      html,
-      text:    textBody,
-      headers: {
-        'List-Unsubscribe': `<${unsubUrl}>`,
-        'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
-      },
-    });
-    return { success: true };
-  } catch (err) {
-    console.error(`[Mailer] Failed to send to ${subscriber.email}:`, err.message);
-    return { success: false, error: err.message };
+  const payload = {
+    from:    `${FROM_NAME} <${FROM_EMAIL}>`,
+    to:      subscriber.email,
+    subject: newsletter.subject,
+    html,
+    text:    textBody,
+    headers: {
+      'List-Unsubscribe': `<${unsubUrl}>`,
+      'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+    },
+  };
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      await resend.emails.send(payload);
+      return { success: true };
+    } catch (err) {
+      if (attempt === 1) {
+        console.warn(`[Mailer] Send attempt 1 failed for ${subscriber.email}; retrying in 2s...`);
+        await sleep(2000);
+      } else {
+        console.error(`[Mailer] Failed to send to ${subscriber.email} after 2 attempts:`, err.message);
+        return { success: false, error: err.message };
+      }
+    }
   }
 }
 

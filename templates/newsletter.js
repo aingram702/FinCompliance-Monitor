@@ -30,6 +30,12 @@ function safeUrl(url) {
   }
 }
 
+// Strips control characters that could break plain-text email headers/lines
+function safeTextUrl(url) {
+  if (!url || typeof url !== 'string') return '';
+  return url.replace(/[\r\n\t]/g, '').trim();
+}
+
 function sourceBadge(source) {
   const color = SOURCE_COLORS[source] || '#888';
   return `<span style="background:${color};color:#fff;padding:2px 7px;border-radius:3px;font-size:11px;font-weight:700;letter-spacing:0.5px;font-family:monospace;">${escHtml(source)}</span>`;
@@ -171,7 +177,7 @@ function buildText(newsletter) {
       text += `\n${item.urgent ? 'URGENT: ' : ''}[${item.source}] ${item.title}\n`;
       text += `${item.summary}\n`;
       text += `Action: ${item.actionRequired}\n`;
-      text += `Link: ${item.url}\n`;
+      text += `Link: ${safeTextUrl(item.url)}\n`;
     }
   }
 
@@ -259,7 +265,7 @@ function buildDigestText(newsletter) {
     if (items.length === 0) continue;
     text += `\n${section.title.toUpperCase()}\n${'-'.repeat(section.title.length)}\n`;
     for (const item of items) {
-      text += `\n[${item.source}] ${item.title}\n${item.summary}\nLink: ${item.url}\n`;
+      text += `\n[${item.source}] ${item.title}\n${item.summary}\nLink: ${safeTextUrl(item.url)}\n`;
     }
   }
 

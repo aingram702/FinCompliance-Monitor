@@ -45,9 +45,16 @@ Follow this exact schema:
  * @param {Array} items - Raw items from scrapers
  * @returns {Object} Structured newsletter object
  */
+const MAX_ITEMS = 150;
+
 async function generateNewsletter(items) {
   if (items.length === 0) {
     return null;
+  }
+
+  if (items.length > MAX_ITEMS) {
+    console.warn(`[Agent] ${items.length} items exceeds cap of ${MAX_ITEMS}; truncating.`);
+    items = items.slice(0, MAX_ITEMS);
   }
 
   // Trim descriptions to avoid blowing the context window

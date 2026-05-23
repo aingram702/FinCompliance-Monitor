@@ -14,12 +14,16 @@ if (missing.length > 0) {
   process.exit(1);
 }
 
+if (!process.env.ADMIN_SECRET_KEY) {
+  console.warn('[Startup] ADMIN_SECRET_KEY is not set — /admin/* endpoints will be inaccessible.');
+}
+
+const crypto  = require('crypto');
 const express = require('express');
 const stripe  = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const {
   upsertSubscriber,
   getSubscriberByToken,
-  getSubscriberByStripeCustomer,
   setSubscriberStatus,
   getActiveSubscribers,
   hasProcessedStripeEvent,
@@ -30,6 +34,28 @@ const {
 const app  = express();
 const PORT = process.env.PORT || 3000;
 const APP_URL = process.env.APP_URL || `http://localhost:${PORT}`;
+
+// Trust one proxy hop (nginx/load balancer) only when explicitly configured
+if (process.env.TRUST_PROXY === 'true') {
+  app.set('trust proxy', 1);
+}
+
+// ── Security headers ──────────────────────────────────────────────────────────
+app.disable('x-powered-by');
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'geolocation=(), camera=(), microphone=()');
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'"
+  );
+  if (req.secure || process.env.NODE_ENV === 'production') {
+    res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains');
+  }
+  next();
+});
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
@@ -117,15 +143,16 @@ app.post(
 
         case 'customer.subscription.updated': {
           const sub = event.data.object;
-          if (['past_due', 'unpaid', 'incomplete_expired'].includes(sub.status)) {
+          const DELINQUENT = ['past_due', 'unpaid', 'incomplete_expired'];
+          if (DELINQUENT.includes(sub.status) || sub.status === 'active') {
             const customer = await stripe.customers.retrieve(sub.customer);
-            setSubscriberStatus(customer.email, 'suspended');
-            console.log(`[Stripe] Suspended (payment issue): ${customer.email}`);
-          }
-          if (sub.status === 'active') {
-            const customer = await stripe.customers.retrieve(sub.customer);
-            setSubscriberStatus(customer.email, 'active');
-            console.log(`[Stripe] Reactivated: ${customer.email}`);
+            if (DELINQUENT.includes(sub.status)) {
+              setSubscriberStatus(customer.email, 'suspended');
+              console.log(`[Stripe] Suspended (payment issue): ${customer.email}`);
+            } else {
+              setSubscriberStatus(customer.email, 'active');
+              console.log(`[Stripe] Reactivated: ${customer.email}`);
+            }
           }
           break;
         }
@@ -140,12 +167,12 @@ app.post(
         default:
           break;
       }
+      recordStripeEvent(event.id, event.type);
     } catch (err) {
       console.error('[Stripe] Error handling event:', err.message);
       return res.status(500).json({ error: 'Internal error processing event' });
     }
 
-    recordStripeEvent(event.id, event.type);
     res.json({ received: true });
   }
 );
@@ -252,7 +279,14 @@ app.get('/cancel', (req, res) => {
 // ── Admin auth middleware ──────────────────────────────────────────────────────
 function requireAdmin(req, res, next) {
   const adminKey = process.env.ADMIN_SECRET_KEY;
-  if (!adminKey || req.headers['x-admin-key'] !== adminKey) {
+  const provided  = req.headers['x-admin-key'];
+  if (!adminKey || !provided) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  // HMAC-based comparison: both sides are hashed to a fixed length before
+  // timingSafeEqual, so neither the key length nor the input length is leaked.
+  const hmac = (s) => crypto.createHmac('sha256', 'admin-key-compare').update(s).digest();
+  if (!crypto.timingSafeEqual(hmac(adminKey), hmac(provided))) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
   next();
@@ -290,8 +324,21 @@ app.get('/admin/newsletters', requireAdmin, (req, res) => {
 // ── Health check ───────────────────────────────────────────────────────────────
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`[Server] Running on port ${PORT}`);
 });
+
+function shutdown(signal) {
+  console.log(`\n[Server] ${signal} received — shutting down gracefully.`);
+  server.close(() => {
+    console.log('[Server] All connections closed. Exiting.');
+    process.exit(0);
+  });
+  // Force-exit after 10 s if connections linger
+  setTimeout(() => process.exit(1), 10_000).unref();
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT',  () => shutdown('SIGINT'));
 
 module.exports = app;

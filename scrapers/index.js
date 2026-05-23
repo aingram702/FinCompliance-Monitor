@@ -25,6 +25,12 @@ async function runAllScrapers() {
     })
   );
 
+  results.forEach((r, i) => {
+    if (r.status === 'rejected') {
+      console.error(`[${ALL_SCRAPERS[i].SOURCE}] Scraper rejected:`, r.reason?.message || r.reason);
+    }
+  });
+
   const allItems = results
     .filter(r => r.status === 'fulfilled')
     .flatMap(r => r.value);
